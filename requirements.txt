@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+
+pydantic
+pydantic-settings
+python-dotenv
+
+pymongo
+redis
+
+langchain
+langgraph
+langchain-google-genai
+langchain-mongodb
+langchain-text-splitters
+
+google-genai
