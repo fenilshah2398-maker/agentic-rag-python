@@ -27,3 +27,4 @@ orders_collection = db["orders"]
 
 # Available for direct async access; RAG path usually uses vector_store instead
 policy_collection = db["policy_chunks"]
+users_collection = db["users"]

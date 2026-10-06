@@ -36,7 +36,7 @@ async def seed():
     data = [
         {
             "order_id": "ORD-1001",
-            "user_id": "USER-001",
+            "user_id": "USER-8624C7",
             "product": "MacBook Pro",
             "amount": 180000,
             "status": "DELIVERED",
@@ -44,7 +44,7 @@ async def seed():
         },
         {
             "order_id": "ORD-1002",
-            "user_id": "USER-001",
+            "user_id": "USER-8624C7",
             "product": "iPhone 17",
             "amount": 90000,
             "status": "SHIPPED",
@@ -52,7 +52,7 @@ async def seed():
         },
         {
             "order_id": "ORD-1003",
-            "user_id": "USER-001",
+            "user_id": "USER-8624C7",
             "product": "Headphones",
             "amount": 12000,
             "status": "CANCELLED",

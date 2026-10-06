@@ -1,0 +1,133 @@
+:root {
+    color: #1c1917;
+    background: #f6f3ee;
+    font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  }
+  
+  * { box-sizing: border-box; }
+  
+  body {
+    margin: 0;
+    min-height: 100vh;
+  }
+  
+  button, input {
+    font: inherit;
+  }
+  
+  .auth-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+  
+  .card {
+    width: min(420px, 100%);
+    display: grid;
+    gap: 12px;
+    padding: 28px;
+    background: white;
+    border: 1px solid #e7e0d6;
+    border-radius: 16px;
+  }
+  
+  .card h1 { margin: 0; font-size: 1.8rem; }
+  
+  label { display: grid; gap: 6px; font-size: 0.95rem; }
+  
+  input {
+    padding: 10px 12px;
+    border: 1px solid #d6d0c6;
+    border-radius: 10px;
+    background: #fffdf9;
+  }
+  
+  button {
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: #1f6b4a;
+    color: white;
+    cursor: pointer;
+  }
+  
+  button:disabled { opacity: 0.55; cursor: default; }
+  
+  .text-button {
+    background: transparent;
+    color: #1f6b4a;
+  }
+  
+  .eyebrow {
+    margin: 0;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: #78716c;
+  }
+  
+  .muted { color: #78716c; }
+  .error { color: #9f1239; margin: 0; }
+  
+  .chat-page {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  
+  .chat-bar, .composer {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding: 16px 20px;
+    background: white;
+    border-bottom: 1px solid #e7e0d6;
+  }
+  
+  .composer { border-bottom: 0; border-top: 1px solid #e7e0d6; }
+  .composer input { flex: 1; }
+  
+  .chat-bar-actions { display: flex; gap: 10px; align-items: center; }
+  
+  .status {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #f5f5f4;
+  }
+  
+  .status-ready { background: #dcfce7; }
+  .status-thinking, .status-connecting { background: #fef3c7; }
+  .status-disconnected { background: #fee2e2; }
+  
+  .transcript {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .bubble {
+    max-width: min(640px, 100%);
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: white;
+    border: 1px solid #e7e0d6;
+  }
+  
+  .bubble p { margin: 0; white-space: pre-wrap; }
+  .bubble.user { margin-left: auto; background: #e7f5ee; }
+  
+  .tag {
+    display: inline-block;
+    margin-top: 8px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: #1f6b4a;
+  }
+  
+  .empty { text-align: center; margin-top: 15vh; }
