@@ -1,3 +1,9 @@
+// One screen, two modes. mode is "signin" or "signup".
+// The name field is rendered only while mode is "signup".
+//
+// The inputs are controlled: React state holds the text, and the
+// input's value is that state. Typing calls setEmail / setPassword,
+// React renders again, and the input shows the new text.
 import { useState } from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 import { useAuth } from "../auth/AuthContext.jsx"
@@ -11,13 +17,16 @@ export function AuthPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  // busy disables the button while the request is in flight.
   const [busy, setBusy] = useState(false)
 
+  // Already signed in (including after a refresh): skip the form.
   if (user) {
     return <Navigate to="/chat" replace />
   }
 
   async function onSubmit(event) {
+    // Stop the browser from reloading the page on submit.
     event.preventDefault()
     setError("")
     setBusy(true)
@@ -27,8 +36,10 @@ export function AuthPage() {
       } else {
         await signIn(email, password)
       }
+      // remember() already saved the token. Now show the chat page.
       navigate("/chat")
     } catch (err) {
+      // api() throws the FastAPI "detail" string, for example a bad password.
       setError(err.message)
     } finally {
       setBusy(false)
@@ -89,6 +100,7 @@ export function AuthPage() {
           {busy ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}
         </button>
 
+        {/* type="button" so this click does not submit the form. */}
         <button
           type="button"
           className="text-button"

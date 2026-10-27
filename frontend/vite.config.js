@@ -12,6 +12,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      // The chat page opens ws://localhost:5173/ws/chat.
+      // Vite keeps that socket open and connects it to FastAPI.
       "/ws": {
         target: "ws://127.0.0.1:8000",
         ws: true,

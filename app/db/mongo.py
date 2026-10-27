@@ -27,4 +27,5 @@ orders_collection = db["orders"]
 
 # Available for direct async access; RAG path usually uses vector_store instead
 policy_collection = db["policy_chunks"]
+# Sign-up inserts one document per account: user_id, name, email, salt, password_hash.
 users_collection = db["users"]

@@ -149,6 +149,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mounts POST /auth/signup, /auth/signin, and /auth/signout.
 app.include_router(auth_router)
 
 
@@ -179,6 +180,8 @@ async def ws_chat(websocket: WebSocket):
     include a user id.
     """
     await websocket.accept()
+    # Stays empty until the first message proves the token.
+    # Questions are ignored until this is a real user id.
     user_id = None
 
     try:
@@ -187,10 +190,12 @@ async def ws_chat(websocket: WebSocket):
             kind = data.get("type")
 
             if user_id is None:
+                # The only legal first message is { "type": "auth", "token": "..." }.
                 if kind != "auth":
                     await websocket.close(code=1008)
                     return
 
+                # Redis: session:<token> -> user_id. None means signed out or expired.
                 user_id = await get_user_id(data.get("token", ""))
                 if user_id is None:
                     await websocket.send_json(
@@ -212,6 +217,8 @@ async def ws_chat(websocket: WebSocket):
                 )
                 continue
 
+            # answer_question checks the last-5 Redis cache, then runs the agent on a miss.
+            # user_id came from the token above, not from this message.
             await websocket.send_json({"type": "status", "text": "thinking"})
             payload = await answer_question(user_id, message)
             await websocket.send_json({"type": "answer", **payload})
