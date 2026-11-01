@@ -1,20 +1,59 @@
 """
 HTTP response schema for chat answers.
 
-Currently main.py returns a plain dict {"answer": ...}.
-This model documents the intended API shape and can be used as
-response_model=ChatResponse on the FastAPI route later.
-
-sources is optional metadata (e.g. policy filenames) for citations —
-not wired in main.py yet, but ready for a future enhancement.
+main.py returns a plain dict. This model documents the shape:
+  answer  — final sentence
+  cached  — True when Redis served it
+  sources — policy filenames (filled later when citations land)
+  trace   — short RAG evidence for this question
 """
 
 from pydantic import BaseModel
 
 
-class ChatResponse(BaseModel):
-    # Final natural-language answer from the agent
-    answer: str
+class TraceChunk(BaseModel):
+    source: str | None = None
+    policy: str | None = None
+    section: str | None = None
+    score: float | None = None
+    preview: str = ""
 
-    # Optional list of document/source names used (default empty)
-    sources: list[str] = []
+
+class TraceTool(BaseModel):
+    name: str
+    args: dict = {}
+
+
+class TraceLatency(BaseModel):
+    total: int = 0
+    llm: int = 0
+    retrieve: int = 0
+
+
+class TraceTokens(BaseModel):
+    input: int = 0
+    output: int = 0
+    total: int = 0
+
+
+class ChatTrace(BaseModel):
+    question: str = ""
+    search_query: str | None = None
+    tools: list[TraceTool] = []
+    chunks: list[TraceChunk] = []
+    latency_ms: TraceLatency = TraceLatency()
+    tokens: TraceTokens = TraceTokens()
+    from_cache: bool = False
+
+
+class Citation(BaseModel):
+    source: str | None = None
+    section: str | None = None
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    cached: bool = False
+    cache_kind: str | None = None
+    sources: list[Citation] = []
+    trace: ChatTrace | None = None

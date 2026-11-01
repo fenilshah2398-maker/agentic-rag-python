@@ -10,8 +10,9 @@ What it does:
   3. Insert three demo rows for USER-001
 
 Date design (important for get_today_orders):
-  ORD-1001 / ORD-1002 → today (hours ago)   → returned by "today" tool
-  ORD-1003            → yesterday           → excluded by "today" filter
+  ORD-1001 / ORD-1002 / ORD-1004 → today
+  ORD-1003                       → yesterday
+  ORD-1004 is PLACED so you can demo Approve-to-cancel.
 """
 
 import asyncio
@@ -58,6 +59,14 @@ async def seed():
             "status": "CANCELLED",
             # Yesterday → will NOT appear in get_today_orders
             "order_date": now - timedelta(days=1),
+        },
+        {
+            "order_id": "ORD-1004",
+            "user_id": "USER-8624C7",
+            "product": "USB-C Cable",
+            "amount": 1500,
+            "status": "PLACED",
+            "order_date": now - timedelta(minutes=30),
         },
     ]
 

@@ -38,6 +38,11 @@ Words you will see a lot:
 | **RAG** | Search policy text by meaning, then let the model answer from those chunks |
 | **WebSocket** | One long live wire. Unlike HTTP, it stays open so answers can come later. |
 | **Cache** | Saved answers in Redis so the same question does not call Gemini again |
+| **Trace** | Evidence for one question: tools, chunks, scores, time, tokens |
+| **Eval** | A fixed list of questions with three scores you can re-run |
+| **Hybrid search** | Vector meaning + keyword tokens, then merge the two lists |
+| **Guardrail** | Python that can refuse a question or an answer. Not a prompt. |
+| **Citation** | The file and section a fact came from, shown under the bubble |
 
 ---
 
@@ -49,7 +54,7 @@ A signed-in user chats with a support agent.
 - "What did I order today?" → look up that user's rows in the `orders` collection
 - "Can I cancel ORD-1002 and get a refund?" → both tools, then one answer
 
-The last 5 answers per user are saved in Redis for 10 minutes. Ask the same question again and the reply is tagged **From cache**. Gemini does not run.
+The last 5 answers per user are saved in Redis for 10 minutes. Ask the same question again and the reply is tagged **From cache**. A close paraphrase can hit the **semantic cache**. Review the new production path in **Part H** at the bottom of this file.
 
 The chat page never sends `user_id`. The server reads it from the session token.
 
@@ -77,14 +82,18 @@ agentic-rag-python/
 │   ├── config.py             reads .env
 │   ├── auth/                 sign up, sign in, sign out
 │   ├── chat/service.py       cache check, then the agent
-│   ├── cache/chat_cache.py   last 5 answers in Redis
+│   ├── cache/                exact answers, semantic cache, memory
+│   ├── guardrails/           input + output checks in Python
+│   ├── eval/                 golden questions + scoring
 │   ├── agent/                LangGraph: think, tools, answer
 │   ├── tools/                Mongo orders + policy search
-│   ├── rag/                  embeddings, chunks, vector store
+│   ├── rag/                  hybrid search, rewrite, rerank, chunks
 │   ├── db/                   Mongo + Redis clients
+│   ├── trace.py              one request's evidence
 │   └── models/               request/response shapes
-├── data/policies/            refund.md, return.md, ...
-├── scripts/                  one-time ingest and seed
+├── data/policies/            refund.md, return.md, ... (## sections)
+├── scripts/                  ingest, seed, eval
+├── evals/                    last_run.json (gitignored)
 └── frontend/                 React screen
     ├── vite.config.js        forwards /api and /ws to FastAPI
     └── src/
@@ -1120,3 +1129,480 @@ npm run dev
 Open http://localhost:5173  
 Sign up. Ask: `What is the refund policy?`  
 Ask it again. The reply should say **From cache**.
+
+Then keep reading **Part H** below. That is the rest of the RAG path.
+
+```
+python -m scripts.eval_rag --self-test
+python -m scripts.eval_rag --limit 3
+python -m scripts.ingest_policies --dry-run
+```
+
+Ask in chat:
+
+- `What is the refund window?` — trace + citation chip `refund.md · Refund window`
+- `What's your refund policy?` — may say **From semantic cache**
+- `And for returns?` — memory uses the last turn
+- `What is the weather?` — input guardrail refuses
+- `Please cancel ORD-1004` — Approve / Reject (seed that order first)
+
+---
+
+# Part H — Production RAG, one idea at a time
+
+Parts A–G get a signed-in user to an answer. This part is what a senior engineer adds next so the answer is **measurable, grounded, and safe**.
+
+Do not jump. Open the file I name. After each step, say the flow out loud in one sentence.
+
+The 12 steps, in the order we built them:
+
+1. Traces
+2. Golden eval
+3. Heading chunks + metadata
+4. Hybrid search
+5. Query rewrite
+6. Rerank, then abstain
+7. Citations
+8. Guardrails
+9. Conversation memory
+10. Human approval before a write
+11. Document lifecycle
+12. Semantic cache + latency budget
+
+---
+
+## H1. Traces — see why, not only what
+
+Open: `app/trace.py`  
+Also: `app/chat/service.py`, `frontend/src/chat/TracePanel.jsx`
+
+A wrong answer has three common causes:
+
+1. The model picked the wrong **tool**
+2. Search returned the wrong **chunks**
+3. The model **worded** the answer badly from good chunks
+
+`answer_question` used to return only the final sentence. You could not tell which of those three happened.
+
+Now every question opens a `RequestTrace`. Think of it as a pocket for this one request. The retriever and the agent write into it. Two users chatting at once each get their own pocket (a contextvar).
+
+What lands in the pocket:
+
+| Field | Meaning |
+|---|---|
+| `question` | What you typed |
+| `original_query` / `search_query` | What was embedded (step 5) |
+| `tools` | Names the model asked to run |
+| `vector_hits` / `keyword_hits` | The two lists before merge (step 4) |
+| `chunks` | The 4 that reached the prompt, with scores |
+| `latency_ms` | rewrite / retrieve / rerank / llm / total |
+| `tokens` | Gemini in / out |
+| `abstain` | Search said "not good enough" |
+
+The **full** block prints in the FastAPI terminal (`RAG TRACE`). A **short** copy goes to the chat bubble and to Redis.
+
+Ask: `What is the refund window?`  
+You should see four rows and scores. If you do not, restart FastAPI so it loads `trace.py`.
+
+One sentence: **a trace is the evidence for one question.**
+
+---
+
+## H2. Golden eval — do not tune by feeling
+
+Open: `app/eval/cases.py`  
+Then: `app/eval/scoring.py`  
+Then: `scripts/eval_rag.py`
+
+A trace tells you what happened **once**. An eval tells you if a change helped **twenty times**.
+
+Each case names:
+
+- `expected_tools` — the agent must call these (extras are OK)
+- `expected_sources` — at least one of these files must appear in the chunks
+- `expected_sections` — at least one heading name, e.g. `Refund window`
+- `must_contain` — a fact copied from the markdown, like `5-7`
+
+Three independent scores:
+
+| Score | Question it answers |
+|---|---|
+| **Tool choice** | Did it look in the right place? |
+| **Retrieval** | Did the right file / section come back? |
+| **Answer fact** | Did the sentence keep a known string? |
+
+`"5-7"` and `"5 to 7"` count as the same fact.
+
+Evals call `run_agent()`, not the Redis cache. A leftover chat answer cannot fake a pass.
+
+```
+python -m scripts.eval_rag --self-test    # fake traces, no Gemini
+python -m scripts.eval_rag --limit 3      # first three live cases
+python -m scripts.eval_rag                # all 20 (slow, calls Gemini)
+```
+
+Order cases belong to `USER-8624C7`. Run `python -m scripts.seed_orders` first.
+
+The table prints at the end. `evals/last_run.json` is written so you can compare two runs. That file is gitignored.
+
+One sentence: **after every later change, re-run the eval and look at the three percentages.**
+
+---
+
+## H3. Heading chunks — retrieval starts at ingest
+
+Open: `data/policies/refund.md`  
+Then: `app/rag/ingestion.py`  
+Then: `scripts/ingest_policies.py`
+
+The old splitter cut every file at 500 characters. These policies were short, so each file became **one blob**. "Refund window" and "promotional discounts" lived in the same vector.
+
+Now each `##` heading is its own chunk, with three tags:
+
+| Tag | Example |
+|---|---|
+| `source` | `refund.md` |
+| `policy` | `refund` |
+| `section` | `Refund window` |
+
+The facts the eval looks for did not change. Only the **shape** of the files changed.
+
+```
+python -m scripts.ingest_policies --dry-run
+```
+
+You should see a line like:
+
+`source=refund.md  policy=refund  section=Refund window`
+
+That is the "done" check for this step. Then the real ingest writes to Atlas. Unchanged files are skipped (see H11).
+
+One sentence: **one idea per chunk, and the heading becomes metadata.**
+
+---
+
+## H4. Hybrid search — meaning plus exact words
+
+Open: `app/rag/bm25.py`  
+Then: `app/rag/hybrid.py`
+
+Vector search is good at meaning: "send the shoes back" ≈ return.  
+It is weak at exact tokens: `5-7`, a heading name, a code.
+
+So we run **two** lists:
+
+1. **Vector** — Atlas `$vectorSearch`, top 20
+2. **Keyword** — BM25 over the active chunks in Mongo, top 20
+
+Then **Reciprocal Rank Fusion**. It does not mix raw scores (they live on different scales). It only uses rank:
+
+```
+fused(d) = 1/(60 + rank_on_vector) + 1/(60 + rank_on_keyword)
+```
+
+A chunk that is #1 on both lists beats a chunk that is #1 on only one.
+
+The trace shows `vector_hits` and `keyword_hits` **before** the merge. That is how you debug hybrid. If the keyword list has `Refund window` and the vector list does not, fusion still has a chance to keep it.
+
+We run BM25 in Python because the set is small. A bigger app would use Atlas Search. The fusion math stays the same.
+
+One sentence: **two ranked lists, then one fused list.**
+
+---
+
+## H5. Query rewrite — embed a search string, not the essay
+
+Open: `app/rag/rewrite.py`
+
+The question you **answer** and the query you **embed** are not the same.
+
+```
+"can I send the shoes back if they don't fit?"
+        →  "return policy time limit"
+```
+
+If the tool query is already short (6 words or fewer, a `?` at the end does not count), we skip Gemini and keep it. That saves a slow call when the model already wrote `refund window`.
+
+The trace has two strings:
+
+- `original_query` — what the tool received
+- `search_query` — what was actually embedded
+
+One sentence: **search the rewritten query; answer the original question.**
+
+---
+
+## H6. Rerank, then abstain — recall is not precision
+
+Open: `app/rag/rerank.py`  
+Then: `app/rag/retriever.py`
+
+Hybrid pulls about **20** chunks. That is **recall**: do not miss the right one.
+
+Rerank keeps the best **4**. That is **precision**: do not stuff the prompt with noise.
+
+If the best **vector** score is under `0.78` **and** keyword search is also weak, we **abstain**. A weak match is not "close enough". A strong keyword hit (like `5-7`) can still support an answer — useful in the minute after ingest, when Atlas sometimes has no vectors yet. The tool returns:
+
+```
+{ "abstain": true, "reason": "no supporting policy", "chunks": [] }
+```
+
+The output guardrail (H8) then forces: `I don't have that in the policy.`
+
+The whole online path is now one function, `search_policy_chunks`:
+
+```
+query → rewrite → hybrid → rerank / abstain → trace
+```
+
+`policy_tools.py` only calls that function. It does not know about BM25.
+
+Ask something off-topic that slipped past the input guardrail, or a policy question with no matching section. The trace should say `abstain: True`. The bubble should not quote a random policy.
+
+One sentence: **fetch wide, keep four, or say you do not know.**
+
+---
+
+## H7. Citations — name the file and the section
+
+Open: `app/agent/nodes.py` (rule 10)  
+Then: `app/guardrails/output.py` (`citations_from_chunks`)  
+Then: `frontend/src/pages/ChatPage.jsx`
+
+The model is told to write `(refund.md · Refund window)` after a policy fact.
+
+The server also builds chips from the **chunks that actually reached the prompt**. The page does not parse the sentence. It trusts the retriever.
+
+Under the bubble you should see a green chip:
+
+`refund.md · Refund window`
+
+That is grounded generation: the source is data, not a guess.
+
+One sentence: **every policy fact should point at a file and a heading.**
+
+---
+
+## H8. Guardrails — code, not a wish in the prompt
+
+Open: `app/guardrails/input.py`  
+Then: `app/guardrails/output.py`  
+Then: `app/agent/graph.py`
+
+The system prompt already says "never invent policy". That is a **request**. A guardrail is a **lock**.
+
+Three locks:
+
+**Input** (before Gemini):
+
+- Strip emails and long digit runs
+- Block "ignore previous instructions" / "reveal the system prompt"
+- Block questions that are not about orders or policy
+
+Ask: `What is the weather?`  
+You get a refusal. The graph does not run.
+
+**Tools** (inside the graph):
+
+- Only names in the allowlist may run
+- After **4** think/tool rounds, `should_continue` goes to `END`
+- `recursion_limit=12` is a second cap
+
+**Output** (after Gemini):
+
+- If search abstained → replace the answer with `I don't have that in the policy.`
+- If we have chunks but the answer shares almost no words with them → same replacement
+
+One sentence: **the prompt asks; Python enforces.**
+
+---
+
+## H9. Conversation memory — "and for returns?"
+
+Open: `app/cache/memory.py`  
+Then: `app/chat/service.py` (`load_history` / `append_turn`)
+
+Each question used to start a **new** graph with only that one sentence. "And for returns?" had no link to the refund answer above it.
+
+Redis now keeps the last **6** spoken turns per user (`chat:memory:<user_id>`). Only user text and assistant text. Not tool JSON.
+
+`run_agent` prepends those turns, then the new question. The model can see the last exchange.
+
+Ask: `What is the refund window?`  
+Then: `And for returns?`  
+The second answer should be about the **return** window (7 days), not a blank stare.
+
+This is **not** the same as the bubble list in `localStorage`. That list is only for drawing the screen. The server memory is what the model sees.
+
+One sentence: **the last few spoken turns travel with the new question.**
+
+---
+
+## H10. Human approval — the model cannot write orders
+
+Open: `app/tools/order_tools.py` (`request_cancellation`)  
+Then: `app/chat/approvals.py`  
+Then: `app/main.py` (the `approval_response` branch)  
+Then: `frontend/src/pages/ChatPage.jsx`
+
+A write is different from a search. Search is safe to run. Changing `orders.status` is not.
+
+```
+You: Please cancel ORD-1004
+  → model calls request_cancellation("ORD-1004")
+  → tool looks up the row (still your user_id, injected)
+  → tool returns needs_approval: true
+  → it does NOT update Mongo
+  → socket sends { type: "approval", order_id, product, status }
+  → yellow card with Approve / Reject
+```
+
+Approve:
+
+```
+{ type: "approval_response", approved: true, order_id: "ORD-1004" }
+  → execute_cancellation(user_id, "ORD-1004")
+  → status becomes CANCELLED
+```
+
+Reject: nothing is written.
+
+`ORD-1002` is SHIPPED. Even if you approve, execute refuses. Policy still wins.
+
+`ORD-1004` is `PLACED` (added in `scripts/seed_orders.py`) so the happy path works. Re-seed if that row is missing:
+
+```
+python -m scripts.seed_orders
+```
+
+Those demo rows belong to `USER-8624C7`. A brand-new sign-up has a different id, so cancel will say "Order not found" until that user has a `PLACED` row.
+
+One sentence: **the tool proposes; a human (or a later job) writes.**
+
+---
+
+## H11. Document lifecycle — do not pile up old chunks
+
+Open: `app/rag/lifecycle.py`  
+Then: `scripts/ingest_policies.py` again
+
+The first ingest script **appended**. Run it twice and traces showed twin chunks with the same score.
+
+Now each file has a **hash** and a **version**.
+
+```
+same hash as last time  → skip (no new Gemini embeddings)
+hash changed            → version += 1
+                        → delete that file's old chunks
+                        → write new chunks with active=True
+```
+
+`--dry-run` still only prints. The real command talks to Atlas.
+
+Unchanged policies cost **zero** embedding calls. That is the point.
+
+One sentence: **a file that did not change is not re-embedded, and old chunks are removed when it did.**
+
+---
+
+## H12. Semantic cache + latency budget
+
+Open: `app/cache/semantic.py`  
+Then: `app/cache/chat_cache.py`  
+Then: `app/trace.py` (`LATENCY_BUDGET_MS`)
+
+Two caches, two jobs:
+
+| Cache | Key | Hits when |
+|---|---|---|
+| Exact | hash(user + cleaned question) | The letters match |
+| Semantic | cosine(embedding, stored embeddings) ≥ 0.93 | The **meaning** matches |
+
+`"What is the refund policy?"` then `"What's your refund policy?"` can hit semantic cache. The bubble says **From semantic cache**.
+
+We only do this for **policy** questions. Order answers go stale when a row changes. If the question has `ORD-1002`, we skip semantic cache.
+
+Latency is recorded per stage. If a stage is slower than the budget, the trace lists it in `over_budget`. The first Gemini call on a cold model often blows the `llm` budget. That is useful, not a crash.
+
+One sentence: **same letters → exact cache; same meaning → semantic cache; every stage has a time budget.**
+
+---
+
+## The full path, said slowly
+
+You type: **"I want to send the shoes back. How long do I have?"**
+
+```
+ChatPage
+  -> socket { type: "question", message: "..." }
+
+input guardrail
+  -> has "back" / return language → ok
+  -> no injection, secrets stripped
+
+exact cache  → miss
+semantic cache → maybe miss (first time)
+
+load last 6 turns from Redis
+run_agent
+  START → agent
+    Gemini calls search_policy("return time limit shoes")
+  tools
+    rewrite  → "return policy time limit"   (if the query was long)
+    vector top 20
+    BM25 top 20
+    RRF merge
+    rerank → 4 chunks
+    best vector 0.86 → keep
+    trace records both lists
+  agent again
+    writes the 7-day fact + (return.md · Return window)
+  END
+
+output guardrail
+  → answer shares words with the chunk → keep it
+citations
+  → chip: return.md · Return window
+save memory, exact cache, semantic cache
+socket { type: "answer", sources, trace }
+```
+
+Ask the same idea with different words a minute later: semantic cache, no Gemini.
+
+Ask `What is the weather?`: input guardrail, no search.
+
+Ask `Please cancel ORD-1004`: approval card, Mongo changes only after Approve.
+
+---
+
+## Part H cheat sheet
+
+```
+app/trace.py                 evidence pocket
+app/eval/cases.py            20 golden questions
+app/eval/scoring.py          three scores
+scripts/eval_rag.py          run the eval
+app/rag/ingestion.py         split on ##
+app/rag/lifecycle.py         hash + version + replace
+app/rag/rewrite.py           long sentence → short query
+app/rag/bm25.py              keyword scores
+app/rag/hybrid.py            vector + keyword + RRF
+app/rag/rerank.py            top 4 or abstain
+app/rag/retriever.py         the online path in one place
+app/guardrails/input.py      refuse before Gemini
+app/guardrails/output.py     refuse after Gemini
+app/agent/graph.py           allowlist + max 4 tool rounds
+app/cache/memory.py          last 6 spoken turns
+app/cache/semantic.py        meaning cache
+app/chat/approvals.py        propose vs write
+app/tools/order_tools.py     request_cancellation
+```
+
+Suggested 20-minute pass on Part H:
+
+1. `app/trace.py` + one chat question
+2. `scripts/eval_rag.py --self-test`
+3. `app/rag/retriever.py` (the new online path)
+4. `app/guardrails/input.py` + "What is the weather?"
+5. Approve flow on `ORD-1004`
+

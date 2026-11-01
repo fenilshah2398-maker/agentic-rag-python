@@ -116,10 +116,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import HumanMessage
 
 from app.auth.routes import router as auth_router
 from app.auth.sessions import get_user_id
+from app.chat.approvals import execute_cancellation
 from app.chat.service import answer_question
 from app.db.mongo import users_collection
 from app.models.request import ChatRequest
@@ -174,7 +174,11 @@ async def ws_chat(websocket: WebSocket):
       2. Server replies {"type": "ready"} after Redis recognizes the token
       3. Browser sends  {"type": "question", "message": "..."}
       4. Server sends   {"type": "status", "text": "thinking"}
-      5. Server sends   {"type": "answer", "answer": "...", "cached": false}
+      5. Server sends   {"type": "answer", "answer": "...",
+                         "cached": false, "trace": {...},
+                         "sources": [...], "approval": null}
+      6. Optional: Browser sends {"type": "approval_response",
+                                  "approved": true, "order_id": "ORD-1004"}
 
     user_id comes from the token. A question message is not allowed to
     include a user id.
@@ -207,6 +211,38 @@ async def ws_chat(websocket: WebSocket):
                 await websocket.send_json({"type": "ready"})
                 continue
 
+            if kind == "approval_response":
+                order_id = str(data.get("order_id") or "").strip()
+                if not data.get("approved"):
+                    await websocket.send_json(
+                        {
+                            "type": "answer",
+                            "answer": f"Cancellation of {order_id or 'the order'} was rejected.",
+                            "cached": False,
+                            "trace": None,
+                            "sources": [],
+                        }
+                    )
+                    continue
+                result = await execute_cancellation(user_id, order_id)
+                if result.get("ok"):
+                    text = (
+                        f"{result['order_id']} ({result.get('product')}) "
+                        "is now CANCELLED."
+                    )
+                else:
+                    text = result.get("error") or "Could not cancel that order."
+                await websocket.send_json(
+                    {
+                        "type": "answer",
+                        "answer": text,
+                        "cached": False,
+                        "trace": None,
+                        "sources": [],
+                    }
+                )
+                continue
+
             if kind != "question":
                 continue
 
@@ -217,11 +253,14 @@ async def ws_chat(websocket: WebSocket):
                 )
                 continue
 
-            # answer_question checks the last-5 Redis cache, then runs the agent on a miss.
             # user_id came from the token above, not from this message.
             await websocket.send_json({"type": "status", "text": "thinking"})
             payload = await answer_question(user_id, message)
             await websocket.send_json({"type": "answer", **payload})
+            if payload.get("approval"):
+                await websocket.send_json(
+                    {"type": "approval", **payload["approval"]}
+                )
 
     except WebSocketDisconnect:
         return

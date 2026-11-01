@@ -129,5 +129,93 @@
     font-size: 0.75rem;
     color: #1f6b4a;
   }
+
+  .trace {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #e7e0d6;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.8rem;
+    color: #57534e;
+  }
+
+  .trace summary {
+    cursor: pointer;
+    color: #1f6b4a;
+    font-weight: 600;
+  }
+
+  .trace-meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    margin: 10px 0 0;
+  }
+
+  .trace-meta dt {
+    margin: 0;
+    color: #78716c;
+  }
+
+  .trace-meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .trace-chunks {
+    margin: 10px 0 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .trace-chunk-head {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .trace-score {
+    font-variant-numeric: tabular-nums;
+    color: #1f6b4a;
+    font-weight: 700;
+    min-width: 3.2em;
+  }
+
+  .trace-source {
+    color: #78716c;
+  }
+
+  .trace-chunks p {
+    margin: 2px 0 0;
+    color: #44403c;
+  }
   
   .empty { text-align: center; margin-top: 15vh; }
+
+  .citations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .chip {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #1f6b4a;
+  }
+
+  .approval-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .bubble.approval {
+    border-color: #fcd34d;
+    background: #fffbeb;
+  }

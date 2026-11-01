@@ -15,6 +15,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
+from app.chat.approvals import preview_cancellation
 from app.db.mongo import orders_collection
 
 
@@ -98,3 +99,18 @@ async def get_order_by_id(
     order.pop("_id", None)
 
     return order
+
+
+@tool
+async def request_cancellation(
+    order_id: str,
+    user_id: Annotated[str, InjectedState("user_id")],
+):
+    """
+    Propose cancelling one of the authenticated user's orders.
+
+    This does NOT cancel the order. It only prepares an approval
+    card. The user must click Approve on the chat page.
+    """
+
+    return await preview_cancellation(user_id, order_id)

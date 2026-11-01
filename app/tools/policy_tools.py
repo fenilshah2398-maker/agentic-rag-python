@@ -1,44 +1,23 @@
 """
-Policy tool — this is the RAG tool inside the agent.
+Policy tool — hybrid RAG inside the agent.
 
-Flow when the LLM calls search_policy(query="..."):
-  1. ToolNode executes this function
-  2. retriever embeds the query (Gemini embeddings)
-  3. Atlas $vectorSearch finds nearest chunks in policy_chunks
-     using index name: policy_vector_index
-  4. We return plain text + source filename for the LLM to cite
-
-Difference vs order tools:
-  - Orders = exact Mongo filters (structured)
-  - Policies = semantic similarity (unstructured RAG)
+search_policy(query) now:
+  1. rewrites the query if it is a long sentence
+  2. runs vector + keyword search
+  3. fuses with RRF, reranks, maybe abstains
+  4. returns {abstain, search_query, chunks}
 """
 
 from langchain_core.tools import tool
 
-from app.rag.retriever import retriever
+from app.rag.retriever import search_policy_chunks
 
 
 @tool
 async def search_policy(query: str):
     """
-    Search company policy documents for information
-    about cancellation, refund, delivery and returns.
-
-    The LLM chooses `query` (e.g. "refund processing time").
-    Good queries are short and topical — the retriever embeds them.
+    Search company policy documents for cancellation, refund,
+    delivery and returns. Use a short topical query.
     """
 
-    # ainvoke runs async similarity search (top-k configured in retriever.py)
-    documents = await retriever.ainvoke(query)
-
-    # Convert LangChain Documents → simple dicts for the LLM / ToolMessage
-    # page_content = chunk text; metadata["source"] = e.g. "refund.md"
-    return [
-        {
-            "content": document.page_content,
-            "source": document.metadata.get(
-                "source"
-            ),
-        }
-        for document in documents
-    ]
+    return await search_policy_chunks(query)

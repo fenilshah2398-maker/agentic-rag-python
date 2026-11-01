@@ -48,18 +48,26 @@ def _key(user_id: str) -> str:
     return f"chat:recent:{user_id}"
 
 
-async def get_cached_answer(user_id: str, q_hash: str) -> str | None:
+async def get_cached_answer(user_id: str, q_hash: str) -> dict | None:
     """
-    Read this user's list and return the answer if the hash is in it.
+    Read this user's list and return the saved item if the hash is in it.
 
     None means the question is not among the last 5, so the agent must run.
+
+    Returned dict:
+      answer — the saved text
+      trace  — the short RAG trace from the first run (may be missing
+               on items cached before traces existed)
     """
     raw_items = await redis_client.lrange(_key(user_id), 0, MAX_RECENT - 1)
 
     for raw in raw_items:
         item = json.loads(raw)
         if item["hash"] == q_hash:
-            return item["answer"]
+            return {
+                "answer": item["answer"],
+                "trace": item.get("trace"),
+            }
 
     return None
 
@@ -69,6 +77,7 @@ async def save_answer(
     q_hash: str,
     question: str,
     answer: str,
+    trace: dict | None = None,
 ) -> None:
     """
     Store one new answer and throw away anything older than the last 5.
@@ -76,6 +85,9 @@ async def save_answer(
     LPUSH  → put this item at the front (newest)
     LTRIM  → keep indexes 0 through 4
     EXPIRE → restart the 10-minute timer
+
+    The short trace is saved next to the answer so a cache hit can
+    still show which chunks produced it.
     """
     key = _key(user_id)
     item = json.dumps(
@@ -83,6 +95,7 @@ async def save_answer(
             "hash": q_hash,
             "question": normalize(question),
             "answer": answer,
+            "trace": trace,
         }
     )
 
